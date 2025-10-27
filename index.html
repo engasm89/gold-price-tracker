@@ -603,12 +603,11 @@
                             <button class="btn btn-success" id="monitoringBtn" onclick="toggleMonitoring()">Stop Monitoring</button>
                         </div>
                         <div class="control-item">
-                            <label class="form-label">Refresh Rate</label>
-                            <select class="form-input" id="refreshRate" onchange="updateRefreshRate()">
-                                <option value="60000">1 Minute</option>
-                                <option value="120000">2 Minutes</option>
-                                <option value="300000">5 Minutes</option>
-                            </select>
+                            <label class="form-label">API Status</label>
+                            <div style="padding: 8px 12px; background: var(--color-bg-input); border-radius: 8px; font-size: 13px;">
+                                <div style="margin-bottom: 4px;"><strong>Rate Limit:</strong> 60 req/hour</div>
+                                <div id="apiStatus">Connecting...</div>
+                            </div>
                         </div>
                         <div class="control-item">
                             <label class="form-label">Manual Actions</label>
@@ -618,6 +617,9 @@
                             <label class="form-label">Export Data</label>
                             <button class="btn btn-secondary" onclick="exportHistory()">Export CSV</button>
                         </div>
+                    </div>
+                    <div class="info-box" style="margin-top: 16px;">
+                        <strong>ℹ️ API Configured:</strong> Real-time gold prices are being fetched from GoldPriceZ API. Updates occur every 60 seconds to respect rate limits (60 requests/hour).
                     </div>
                 </div>
             </div>
@@ -713,12 +715,19 @@
             initialPrice: 4100,
             pipValue: 0.10,
             defaultThresholdPips: 500,
-            refreshRate: 60000,
+            refreshRate: 60000, // 1 minute
             timeframes: [
                 { name: '5 Minutes', duration: 300000, id: '5min' },
                 { name: '15 Minutes', duration: 900000, id: '15min' },
                 { name: '1 Hour', duration: 3600000, id: '1hour' }
-            ]
+            ],
+            api: {
+                key: 'd2f90945a7b5c84f9b0bb6d4b9cb030ad2f90945',
+                endpoint: 'https://goldpricez.com/api/latest',
+                rateLimit: 60, // requests per hour
+                minInterval: 60000, // 1 minute between calls
+                timeout: 5000 // 5 second timeout
+            }
         };
 
         // State
@@ -735,7 +744,14 @@
             sessions: {},
             alertHistory: [],
             refreshInterval: null,
-            sessionIntervals: {}
+            sessionIntervals: {},
+            apiState: {
+                lastCallTime: 0,
+                requestCount: 0,
+                lastSuccessTime: null,
+                connectionStatus: 'connecting', // 'connected', 'error', 'connecting'
+                errorMessage: null
+            }
         };
 
         // Initialize sessions
@@ -755,10 +771,13 @@
             requestNotificationPermission();
             updateDateTime();
             setInterval(updateDateTime, 1000);
+            // Update connection status every second for timing display
+            setInterval(updateConnectionStatus, 1000);
             renderPriceCards();
             renderMovementTrackers();
             startMonitoring();
             updateThresholdDollars();
+            updateConnectionStatus();
             
             // Add input listener for threshold
             document.getElementById('thresholdPips').addEventListener('input', updateThresholdDollars);
@@ -857,48 +876,164 @@
             }).join('');
         }
 
-        // Simulate price movement
-        function generatePriceMovement() {
-            const rand = Math.random();
-            let change;
+        // Check rate limit before making API call
+        function canMakeAPICall() {
+            const now = Date.now();
+            const timeSinceLastCall = now - state.apiState.lastCallTime;
             
-            if (rand < 0.1) {
-                // 10% chance of large movement
-                change = (Math.random() * 120 - 60) * 0.1; // -6 to +6 dollars
-            } else {
-                // 90% chance of small movement
-                change = (Math.random() * 10 - 5) * 0.1; // -0.5 to +0.5 dollars
+            // Enforce minimum interval
+            if (timeSinceLastCall < CONFIG.api.minInterval) {
+                return false;
             }
             
-            return change;
+            return true;
+        }
+
+        // Fetch real gold price from API
+        async function fetchRealGoldPrice() {
+            try {
+                // Check rate limit
+                if (!canMakeAPICall()) {
+                    console.log('Rate limit: waiting before next API call');
+                    return null;
+                }
+                
+                // Update call tracking
+                state.apiState.lastCallTime = Date.now();
+                state.apiState.requestCount++;
+                
+                // Make API call with timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), CONFIG.api.timeout);
+                
+                // Construct API URL with key
+                const apiUrl = `${CONFIG.api.endpoint}?key=${CONFIG.api.key}`;
+                
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                // Extract gold price - adjust based on actual API response structure
+                let price = null;
+                
+                // Try common response formats
+                if (data.price) price = parseFloat(data.price);
+                else if (data.rates && data.rates.XAU_USD) price = parseFloat(data.rates.XAU_USD);
+                else if (data.gold_price) price = parseFloat(data.gold_price);
+                else if (data.value) price = parseFloat(data.value);
+                else if (data.data && data.data.price) price = parseFloat(data.data.price);
+                else if (data.XAU_USD) price = parseFloat(data.XAU_USD);
+                else if (typeof data === 'number') price = data;
+                
+                // Validate price
+                if (!price || isNaN(price) || price <= 0) {
+                    throw new Error('Invalid price data received from API');
+                }
+                
+                // Success - update API state
+                state.apiState.connectionStatus = 'connected';
+                state.apiState.lastSuccessTime = Date.now();
+                state.apiState.errorMessage = null;
+                updateConnectionStatus();
+                
+                return price;
+                
+            } catch (error) {
+                console.error('Error fetching gold price:', error);
+                state.apiState.connectionStatus = 'error';
+                state.apiState.errorMessage = error.message || 'Failed to fetch gold price';
+                updateConnectionStatus();
+                return null;
+            }
         }
 
         // Update prices
-        function updatePrices() {
+        async function updatePrices() {
             if (!state.monitoring) return;
             
-            const priceChange = generatePriceMovement();
-            state.currentPrice += priceChange;
+            // Fetch real gold price from API
+            const newPrice = await fetchRealGoldPrice();
             
-            // Update all sessions
-            CONFIG.timeframes.forEach(tf => {
-                const session = state.sessions[tf.id];
-                session.current = state.currentPrice;
-                session.high = Math.max(session.high, state.currentPrice);
-                session.low = Math.min(session.low, state.currentPrice);
+            if (newPrice !== null) {
+                // Update price only if we got valid data
+                const priceChange = newPrice - state.currentPrice;
+                state.currentPrice = newPrice;
                 
-                // Check for session reset
-                const elapsed = Date.now() - session.startTime;
-                if (elapsed >= tf.duration) {
-                    resetSession(tf.id);
+                // Update all sessions
+                CONFIG.timeframes.forEach(tf => {
+                    const session = state.sessions[tf.id];
+                    
+                    // Only update if there's an actual price change
+                    if (Math.abs(priceChange) > 0.01) {
+                        session.current = state.currentPrice;
+                        session.high = Math.max(session.high, state.currentPrice);
+                        session.low = Math.min(session.low, state.currentPrice);
+                    }
+                    
+                    // Check for session reset
+                    const elapsed = Date.now() - session.startTime;
+                    if (elapsed >= tf.duration) {
+                        resetSession(tf.id);
+                    }
+                    
+                    // Check for alert
+                    checkAlert(tf);
+                });
+                
+                renderPriceCards();
+                renderMovementTrackers();
+            } else {
+                // API failed or rate limited
+                console.log('Unable to fetch price - API unavailable or rate limited');
+                updateConnectionStatus();
+            }
+        }
+
+        // Update connection status UI
+        function updateConnectionStatus() {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const apiStatus = document.getElementById('apiStatus');
+            
+            if (statusDot && statusText) {
+                if (state.apiState.connectionStatus === 'connected') {
+                    statusDot.className = 'status-dot connected';
+                    statusText.textContent = 'Connected';
+                } else if (state.apiState.connectionStatus === 'error') {
+                    statusDot.className = 'status-dot disconnected';
+                    statusText.textContent = 'API Error';
+                } else {
+                    statusDot.className = 'status-dot disconnected';
+                    statusText.textContent = 'Configuring...';
                 }
-                
-                // Check for alert
-                checkAlert(tf);
-            });
+            }
             
-            renderPriceCards();
-            renderMovementTrackers();
+            if (apiStatus) {
+                if (state.apiState.connectionStatus === 'connected') {
+                    if (state.apiState.lastSuccessTime) {
+                        const timeSince = Math.floor((Date.now() - state.apiState.lastSuccessTime) / 1000);
+                        apiStatus.textContent = `Last update: ${timeSince}s ago`;
+                    } else {
+                        apiStatus.textContent = 'Connected';
+                    }
+                } else if (state.apiState.connectionStatus === 'error') {
+                    apiStatus.textContent = state.apiState.errorMessage || 'Connection failed';
+                } else {
+                    apiStatus.textContent = 'Initializing...';
+                }
+            }
         }
 
         // Reset session
@@ -1042,14 +1177,18 @@
                 clearInterval(state.refreshInterval);
             }
             
-            const refreshRate = parseInt(document.getElementById('refreshRate').value);
-            state.refreshInterval = setInterval(updatePrices, refreshRate);
+            // Lock to 60 seconds (1 minute) to respect API rate limits
+            state.refreshInterval = setInterval(updatePrices, 60000);
             state.monitoring = true;
             
-            document.getElementById('statusDot').className = 'status-dot connected';
-            document.getElementById('statusText').textContent = 'Connected';
+            // Set initial connection status
+            updateConnectionStatus();
+            
             document.getElementById('monitoringBtn').textContent = 'Stop Monitoring';
             document.getElementById('monitoringBtn').className = 'btn btn-danger';
+            
+            // Initial price fetch
+            updatePrices();
         }
 
         // Stop monitoring
@@ -1074,16 +1213,9 @@
             }
         }
 
-        // Update refresh rate
-        function updateRefreshRate() {
-            if (state.monitoring) {
-                startMonitoring();
-            }
-        }
-
         // Refresh prices manually
-        function refreshPrices() {
-            updatePrices();
+        async function refreshPrices() {
+            await updatePrices();
         }
 
         // Toggle alerts
