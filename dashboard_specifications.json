@@ -1,0 +1,107 @@
+{
+  "tracking_parameters": {
+    "asset": "Gold (XAU/USD)",
+    "timeframes": [
+      "5 minutes",
+      "15 minutes",
+      "1 hour"
+    ],
+    "alert_threshold": "500 pips ($50 per ounce)",
+    "alert_methods": [
+      "Email",
+      "Telegram Bot"
+    ],
+    "monitoring_type": "Real-time continuous"
+  },
+  "data_sources": {
+    "free_apis": [
+      {
+        "name": "MetalpriceAPI",
+        "url": "https://metalpriceapi.com",
+        "features": [
+          "Real-time gold spot prices",
+          "150+ currencies",
+          "Historical data"
+        ],
+        "free_tier": "Limited requests"
+      },
+      {
+        "name": "Metals.dev",
+        "url": "https://api.metals.dev/v1/latest",
+        "features": [
+          "Real-time precious metals",
+          "170+ currencies",
+          "Bank-grade security"
+        ],
+        "pricing": "100 free requests/month"
+      },
+      {
+        "name": "GoldPriceZ API",
+        "url": "https://goldpricez.com/api",
+        "features": [
+          "Real-time gold/silver",
+          "Multiple measures",
+          "REST JSON"
+        ],
+        "limitation": "60 requests per hour"
+      },
+      {
+        "name": "Twelve Data",
+        "url": "https://twelvedata.com",
+        "features": [
+          "Forex/Commodities",
+          "WebSocket support",
+          "1-min updates"
+        ],
+        "realtime": "Yes with WebSocket"
+      }
+    ]
+  },
+  "technical_implementation": {
+    "frontend": {
+      "html5": "Structure and layout",
+      "css3": "Styling and responsive design",
+      "javascript": "Logic and API integration"
+    },
+    "realtime_updates": {
+      "websocket": "For continuous data streaming",
+      "polling": "API calls every 1-5 minutes as fallback",
+      "notification_api": "Browser notifications"
+    },
+    "alert_system": {
+      "email": {
+        "method": "SMTP.js or EmailJS",
+        "limitation": "Client-side exposed credentials",
+        "alternative": "Backend service recommended"
+      },
+      "telegram": {
+        "setup": "Create bot via @BotFather",
+        "api": "https://api.telegram.org/bot{token}/sendMessage",
+        "parameters": [
+          "chat_id",
+          "text"
+        ]
+      }
+    }
+  },
+  "price_tracking_logic": {
+    "session_tracking": "Track price changes within timeframe",
+    "pip_calculation": "1 pip = $0.10 for gold; 500 pips = $50",
+    "alert_conditions": [
+      "Single session movement >= $50",
+      "Multiple consecutive sessions >= $50 cumulative"
+    ],
+    "data_persistence": "LocalStorage for historical tracking"
+  },
+  "dashboard_features": [
+    "Multi-timeframe price display (5m, 15m, 1h)",
+    "Real-time price updates",
+    "Session high/low tracking",
+    "Movement calculator (pips)",
+    "Visual alerts (color coding)",
+    "Alert history log",
+    "Manual trigger test",
+    "Email configuration panel",
+    "Telegram bot integration"
+  ]
+}
